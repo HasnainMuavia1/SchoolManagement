@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django.contrib.humanize',
     'example',
+    'portal',
 ]
 
 MIDDLEWARE = [
@@ -53,6 +54,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'api.host_routing.HostRoutingMiddleware',
+    'api.host_access_guard.HostAccessGuardMiddleware',
 ]
 
 ROOT_URLCONF = 'api.urls'
@@ -81,7 +84,7 @@ DATABASES = {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": "postgres" if DEBUG else os.environ.get("POSTGRES_DATABASE"),
         "USER": "postgres" if DEBUG else os.environ.get("POSTGRES_USER"),
-        "PASSWORD": "hasnain" if DEBUG else os.environ.get("POSTGRES_PASSWORD", ""),
+        "PASSWORD": "786123" if DEBUG else os.environ.get("POSTGRES_PASSWORD", ""),
         "HOST": "localhost" if DEBUG else os.environ.get("POSTGRES_HOST"),
         "PORT": "5432",
         "OPTIONS": {
@@ -135,6 +138,14 @@ CLOUDINARY_STORAGE = {
 }
 
 # Authentication settings
-LOGIN_URL = 'login'
-LOGIN_REDIRECT_URL = 'dashboard'
-LOGOUT_REDIRECT_URL = 'login'
+LOGIN_URL = 'portal:portal_login'
+LOGIN_REDIRECT_URL = 'portal:portal_dashboard'
+LOGOUT_REDIRECT_URL = 'portal:portal_login'
+
+# Hosts mapping for domain-based routing
+PORTAL_HOSTS = os.environ.get('PORTAL_HOSTS', 'aktiportal.vercel.app').split(',')
+EXAMPLE_HOSTS = os.environ.get('EXAMPLE_HOSTS', 'aktipos.vercel.app').split(',')
+
+# Session cookie hardening (host-scoped by default; secure in production)
+SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SECURE = not DEBUG
