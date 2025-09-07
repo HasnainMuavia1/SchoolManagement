@@ -51,7 +51,8 @@
                             <tr>
                                 {% for rec in item.history %}
                                 <th class="text-left py-2 px-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                                    {{ rec.date|date:"D" }}<br>{{ rec.date|date:"M d" }}
+                                    {{ rec.date|date:"D" }}<br>{{ rec.date|date:"M d" }}<br>
+                                    <span class="normal-case text-[11px]">{{ rec.start_time }}&nbsp;&ndash;&nbsp{{ rec.end_time }}</span>
                                 </th>
                                 {% endfor %}
                             </tr>

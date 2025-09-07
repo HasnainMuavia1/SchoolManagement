@@ -12,6 +12,7 @@ from django.views.decorators.http import require_http_methods
 import json
 import csv
 from datetime import datetime, timedelta
+import pytz
 
 from .models import Trainer, TrainerCourse, Lecture, Attendance, AttendanceReport
 from .forms import (
@@ -425,6 +426,23 @@ def trainer_start_attendance(request, trainer_course_id):
     last_lecture = Lecture.objects.filter(trainer_course=trainer_course).order_by('-lecture_number').first()
     next_number = 1 if not last_lecture else last_lecture.lecture_number + 1
 
+    # If last lecture was completed, enforce slot cooldown until its end time
+    if last_lecture and last_lecture.is_completed:
+        # Build aware datetime for last lecture end in Pakistan time
+        pk_tz = pytz.timezone('Asia/Karachi')
+        last_end_naive = datetime.combine(last_lecture.date, last_lecture.end_time)
+        last_end = pk_tz.localize(last_end_naive)
+        now = timezone.now().astimezone(pk_tz)
+        if now < last_end:
+            remaining = last_end - now
+            # Round remaining minutes up
+            remaining_minutes = int((remaining.total_seconds() + 59) // 60)
+            messages.warning(
+                request,
+                f"You can't start the next lecture yet. Please wait ~{remaining_minutes} minutes until {last_end.strftime('%I:%M %p')}"
+            )
+            return redirect('portal:trainer_course_detail', trainer_course_id=trainer_course.id)
+
     # If the last lecture exists and is not completed, reuse it; otherwise create next
     if last_lecture and not last_lecture.is_completed:
         lecture = last_lecture
@@ -454,6 +472,17 @@ def mark_attendance(request, lecture_id):
     lecture = get_object_or_404(Lecture, id=lecture_id, trainer_course__trainer=trainer)
     
     if request.method == 'POST':
+        # If this is the first time marking for this lecture, reset slot to start now
+        if not Attendance.objects.filter(lecture=lecture).exists():
+            pk_tz = pytz.timezone('Asia/Karachi')
+            now = timezone.now().astimezone(pk_tz)
+            duration_minutes = 60 if ('1_month' in (lecture.trainer_course.course.duration or '')) else 90
+            new_end = now + timedelta(minutes=duration_minutes)
+            lecture.date = now.date()
+            lecture.start_time = now.time().replace(second=0, microsecond=0)
+            lecture.end_time = new_end.time().replace(second=0, microsecond=0)
+            lecture.save(update_fields=['date', 'start_time', 'end_time'])
+
         # Handle bulk attendance submission
         data = json.loads(request.body)
         success_count = 0
@@ -690,7 +719,10 @@ def download_attendance_report(request, report_type, object_id=None):
         header_row2 = ['', '']
         for idx, lec in enumerate(lectures, start=1):
             header_row1.extend([f"Lecture # {idx}", ''])
-            header_row2.extend([lec.date.strftime('%a').upper(), lec.date.strftime('%d/%m/%Y')])
+            start_str = lec.start_time.strftime('%I:%M %p') if lec.start_time else ''
+            end_str = lec.end_time.strftime('%I:%M %p') if lec.end_time else ''
+            date_time_str = f"{lec.date.strftime('%d/%m/%Y')} {start_str}\u2013{end_str}" if lec.date else f"{start_str}\u2013{end_str}"
+            header_row2.extend([lec.date.strftime('%a').upper() if lec.date else '', date_time_str])
         header_row1.append('Marked By')
         header_row2.append('')
         ws.append(header_row1)
@@ -930,14 +962,18 @@ def student_details(request, student_id):
         total = attendances.count()
         present = attendances.filter(status__in=['present', 'late']).count()
         absent = attendances.filter(status='absent').count()
-        # Build compact history list for template rendering
+        # Build compact history list for template rendering (with 12-hour time)
         history = []
         for a in attendances:
             symbol = 'P' if a.status in ['present', 'late'] else ('A' if a.status == 'absent' else '-')
+            start_str = a.lecture.start_time.strftime('%I:%M %p') if a.lecture.start_time else ''
+            end_str = a.lecture.end_time.strftime('%I:%M %p') if a.lecture.end_time else ''
             history.append({
                 'date': a.lecture.date,
                 'status': a.status,
                 'symbol': symbol,
+                'start_time': start_str,
+                'end_time': end_str,
             })
         course_summaries.append({
             'course': c,

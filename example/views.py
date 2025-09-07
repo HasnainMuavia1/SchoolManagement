@@ -1940,3 +1940,115 @@ def batch_management(request):
     }
     
     return render(request, 'invoice/batch_management.html', context)
+def commission_report(request):
+    """Commission report view for admin dashboard"""
+    if not request.user.is_authenticated or not request.user.is_staff:
+        return redirect('login')
+    
+    # Get filter parameters
+    start_date = request.GET.get('start_date', '')
+    end_date = request.GET.get('end_date', '')
+    commission_percent = request.GET.get('commission_percent', 1)  # Default 1%
+    
+    try:
+        commission_percent = float(commission_percent)
+    except ValueError:
+        commission_percent = 1.0
+    
+    # Get all CSRs for the cards display with student counts
+    csrs = CSRProfile.objects.all().order_by('user__first_name', 'user__last_name')
+    
+    # Add completed student count for each CSR
+    for csr in csrs:
+        csr.completed_students_count = Student.objects.filter(
+            created_by=csr,
+            balance=0,
+            payment_status='paid'
+        ).count()
+    
+    # Initialize commission data
+    commission_data = []
+    total_commission = 0
+    total_admissions = 0
+    total_revenue = 0
+    total_payment_in_range = 0
+    
+    if start_date and end_date:
+        try:
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d').date()
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d').date()
+            
+            # Get students with completed payments (balance = 0) within date range
+            completed_students = Student.objects.filter(
+                balance=0,  # Only completed payments
+                payment_status='paid',  # Payment status is paid
+                created_at__date__range=[start_dt, end_dt]
+            ).select_related('created_by', 'batch').prefetch_related('courses')
+            
+            # Calculate commission for each CSR
+            for csr in csrs:
+                csr_students = completed_students.filter(created_by=csr)
+                
+                if csr_students.exists():
+                    # Calculate total revenue and commission
+                    csr_total_revenue = sum(student.discounted_price for student in csr_students)
+                    csr_commission = (csr_total_revenue * commission_percent) / 100
+                    csr_admissions = csr_students.count()
+                    
+                    # Calculate total payment received in range for this CSR's students
+                    csr_total_payment_in_range = 0
+                    
+                    # Add individual commission amounts to each student
+                    for student in csr_students:
+                        student.commission_amount = (student.discounted_price * commission_percent) / 100
+                        # Calculate payment received in range (advance + second installment if within range)
+                        payment_in_range = 0
+                        if start_dt <= student.created_at.date() <= end_dt:
+                            payment_in_range += student.advance_payment or 0
+                        if student.due_date and start_dt <= student.due_date <= end_dt:
+                            payment_in_range += student.second_installment or 0
+                        csr_total_payment_in_range += payment_in_range
+                    
+                    commission_data.append({
+                        'csr': csr,
+                        'total_revenue': csr_total_revenue,
+                        'commission': csr_commission,
+                        'admissions': csr_admissions,
+                        'students': csr_students,
+                        'total_payment_in_range': csr_total_payment_in_range
+                    })
+                    
+                    total_commission += csr_commission
+                    total_admissions += csr_admissions
+                    total_revenue += csr_total_revenue
+                    total_payment_in_range += csr_total_payment_in_range
+            
+            # Sort by commission amount (highest first)
+            commission_data.sort(key=lambda x: x['commission'], reverse=True)
+            
+        except ValueError as e:
+            # Invalid date format
+            messages.error(request, f"Invalid date format: {e}")
+        except Exception as e:
+            # General error handling
+            messages.error(request, f"Error calculating commissions: {e}")
+    
+    context = {
+        'csrs': csrs,
+        'commission_data': commission_data,
+        'total_commission': total_commission,
+        'total_admissions': total_admissions,
+        'total_revenue': total_revenue,
+        'total_payment_in_range': total_payment_in_range,
+        'commission_percent': commission_percent,
+        'start_date': start_date,
+        'end_date': end_date,
+        'has_filters': bool(start_date and end_date)
+    }
+    
+    # Debug information (remove in production)
+    print(f"Debug: Found {len(csrs)} CSRs")
+    for csr in csrs:
+        print(f"Debug: CSR {csr.get_full_name()} has {csr.completed_students_count} completed students")
+    
+    return render(request, 'invoice/commission.html', context)

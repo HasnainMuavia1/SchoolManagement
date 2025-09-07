@@ -164,6 +164,12 @@
                                     <span>Revenue by Batch & Course</span>
                                 </a>
                             </li>
+                            <li class="nav-item {% if 'commission_report' in request.path %}active{% endif %}">
+                                <a href="{% url 'commission_report' %}" class="nav-link" style="color: var(--sidebar-foreground);">
+                                    <i class="fas fa-percentage"></i>
+                                    <span>Commission Report</span>
+                                </a>
+                            </li>
                         </ul>
                     </div>
                 </nav>
