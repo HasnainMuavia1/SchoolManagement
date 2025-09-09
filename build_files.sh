@@ -1,21 +1,18 @@
+#!/usr/bin/env bash
+set -e
 echo "BUILD START"
 
-# create a virtual environment named 'venv' if it doesn't already exist
-python3.9 -m venv venv
+# Install dependencies
+pip3 install -r requirements.txt
 
-# activate the virtual environment
-source venv/bin/activate
+# Ensure Django can find settings and project modules
+export DJANGO_SETTINGS_MODULE=api.settings
+export PYTHONPATH="$(pwd)"
 
-# install all deps in the venv
-pip install -r requirements.txt
-
-# create necessary directories
+# Create output directories expected by Vercel
 mkdir -p staticfiles media
 
-# collect static files using the Python interpreter from venv
-python manage.py collectstatic --noinput
-#python manage.py migrate
-echo "BUILD END"
+# Collect static files
+python3 manage.py collectstatic --noinput
 
-# [optional] Start the application here
-#python manage.py runserver
+echo "BUILD END"
