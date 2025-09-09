@@ -11,6 +11,7 @@ urlpatterns = [
     # Admin
     path('admin/dashboard/', views.admin_dashboard, name='admin_dashboard'),
     path('admin/trainers/', views.trainer_management, name='trainer_management'),
+    path('admin/trainers/add/', views.trainer_add, name='trainer_add'),
     path('admin/trainers/<int:trainer_id>/edit/', views.trainer_edit, name='trainer_edit'),
     path('admin/trainers/<int:trainer_id>/delete/', views.trainer_delete, name='trainer_delete'),
 
@@ -27,6 +28,7 @@ urlpatterns = [
     path('trainer/dashboard/', views.trainer_dashboard, name='trainer_dashboard'),
     path('trainer/course/<int:trainer_course_id>/', views.trainer_course_detail, name='trainer_course_detail'),
     path('trainer/course/<int:trainer_course_id>/attendance/start/', views.trainer_start_attendance, name='trainer_start_attendance'),
+    path('trainer/course/<int:trainer_course_id>/attendance/create-for-date/', views.trainer_create_attendance_for_date, name='trainer_create_attendance_for_date'),
     path('trainer/attendance/<int:lecture_id>/', views.mark_attendance, name='mark_attendance'),
     path('trainer/reports/', views.trainer_reports, name='trainer_reports'),
 

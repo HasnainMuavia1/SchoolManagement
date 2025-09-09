@@ -14,12 +14,12 @@
                     <p class="text-sm text-muted-foreground">Add new trainers to the system</p>
                 </div>
                 
-                <button id="add-trainer-btn" class="bg-primary text-primary-foreground py-3 px-6 rounded-md font-medium hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all duration-200 flex items-center space-x-2">
+                <a href="{% url 'portal:trainer_add' %}" class="bg-primary text-primary-foreground py-3 px-6 rounded-md font-medium hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all duration-200 flex items-center space-x-2">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
                     </svg>
                     <span>Add New Trainer</span>
-                </button>
+                </a>
             </div>
             
             <!-- Quick Stats Row -->
@@ -165,84 +165,7 @@
         </div>
     </div>
 
-    <!-- Add Trainer Modal -->
-    <div id="add-trainer-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden">
-        <div class="flex items-center justify-center min-h-screen p-4">
-            <div class="bg-card border border-border rounded-lg p-6 w-full max-w-md mx-auto">
-                <div class="flex items-center justify-between mb-4">
-                    <h3 class="text-lg font-semibold text-foreground">Add New Trainer</h3>
-                    <button id="close-modal" class="text-muted-foreground hover:text-foreground">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                        </svg>
-                    </button>
-                </div>
-                
-                <form id="trainer-modal-form" method="post" class="space-y-4">
-                    {% csrf_token %}
-                    
-                    <div>
-                        <label for="{{ form.name.id_for_label }}" class="block text-sm font-medium text-foreground mb-2">
-                            Trainer Name
-                        </label>
-                        {{ form.name }}
-                        {% if form.name.errors %}
-                            <p class="text-sm text-destructive mt-1">{{ form.name.errors.0 }}</p>
-                        {% endif %}
-                    </div>
-                    
-                    <div>
-                        <label for="{{ form.username.id_for_label }}" class="block text-sm font-medium text-foreground mb-2">
-                            Username
-                        </label>
-                        {{ form.username }}
-                        {% if form.username.errors %}
-                            <p class="text-sm text-destructive mt-1">{{ form.username.errors.0 }}</p>
-                        {% endif %}
-                    </div>
-                    
-                    <div>
-                        <label for="{{ form.email.id_for_label }}" class="block text-sm font-medium text-foreground mb-2">
-                            Email Address
-                        </label>
-                        {{ form.email }}
-                        {% if form.email.errors %}
-                            <p class="text-sm text-destructive mt-1">{{ form.email.errors.0 }}</p>
-                        {% endif %}
-                    </div>
-                    
-                    <div>
-                        <label for="{{ form.password1.id_for_label }}" class="block text-sm font-medium text-foreground mb-2">
-                            Password
-                        </label>
-                        {{ form.password1 }}
-                        {% if form.password1.errors %}
-                            <p class="text-sm text-destructive mt-1">{{ form.password1.errors.0 }}</p>
-                        {% endif %}
-                    </div>
-                    
-                    <div>
-                        <label for="{{ form.password2.id_for_label }}" class="block text-sm font-medium text-foreground mb-2">
-                            Confirm Password
-                        </label>
-                        {{ form.password2 }}
-                        {% if form.password2.errors %}
-                            <p class="text-sm text-destructive mt-1">{{ form.password2.errors.0 }}</p>
-                        {% endif %}
-                    </div>
-                    
-                    <div class="flex justify-end space-x-3 pt-4">
-                        <button type="button" id="cancel-btn" class="px-4 py-2 border border-border text-foreground rounded-md hover:bg-muted transition-colors">
-                            Cancel
-                        </button>
-                        <button type="submit" class="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-colors">
-                            Create Trainer
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
+    <!-- Creation moved to dedicated page -->
 {% endblock %}
 
 {% block extra_js %}
@@ -366,77 +289,7 @@
         }
     });
 
-    // Modal functionality
-    const modal = document.getElementById('add-trainer-modal');
-    const addBtn = document.getElementById('add-trainer-btn');
-    const closeBtn = document.getElementById('close-modal');
-    const cancelBtn = document.getElementById('cancel-btn');
-    
-    function openModal() {
-        modal.classList.remove('hidden');
-        document.body.style.overflow = 'hidden';
-    }
-    
-    function closeModal() {
-        modal.classList.add('hidden');
-        document.body.style.overflow = 'auto';
-    }
-    
-    addBtn.addEventListener('click', openModal);
-    closeBtn.addEventListener('click', closeModal);
-    cancelBtn.addEventListener('click', closeModal);
-    
-    // Close modal when clicking outside
-    modal.addEventListener('click', function(e) {
-        if (e.target === modal) {
-            closeModal();
-        }
-    });
-    
-    // Form submission with AJAX
-    document.getElementById('trainer-modal-form').addEventListener('submit', function(e) {
-        e.preventDefault();
-        
-        const formData = new FormData(this);
-        
-        fetch('{% url "portal:trainer_management" %}', {
-            method: 'POST',
-            body: formData,
-            headers: {
-                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
-                'X-Requested-With': 'XMLHttpRequest'
-            }
-        })
-        .then(async (response) => {
-            const contentType = response.headers.get('content-type') || '';
-            const text = await response.text();
-            let data;
-            try {
-                data = JSON.parse(text);
-            } catch (e) {
-                console.error('Unexpected non-JSON response:', text);
-                alert('Unexpected response from server. Please try again.');
-                return null;
-            }
-            if (!data) return null;
-            return data;
-        })
-        .then(data => {
-            if (!data) return;
-            if (data.success) {
-                alert('Trainer created successfully!');
-                closeModal();
-                location.reload();
-            } else {
-                const message = data.message || 'Failed to create trainer.';
-                alert('Error: ' + message);
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('An error occurred while creating trainer');
-        });
-    });
+    // Modal removed; creation handled on separate page
 </script>
 {% endblock %}
 

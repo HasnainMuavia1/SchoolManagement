@@ -58,8 +58,8 @@ class TrainerCourseAdmin(admin.ModelAdmin):
 
 @admin.register(Lecture)
 class LectureAdmin(admin.ModelAdmin):
-    list_display = ['lecture_number', 'trainer_course', 'date', 'start_time', 'end_time', 'duration_minutes', 'is_completed', 'attendance_count']
-    list_filter = ['is_completed', 'date', 'trainer_course__course__duration']
+    list_display = ['lecture_number', 'trainer_course', 'date', 'start_time', 'end_time', 'duration_minutes', 'attendance_count']
+    list_filter = ['date', 'trainer_course__course__duration']
     search_fields = ['trainer_course__trainer__name', 'trainer_course__course__name']
     readonly_fields = ['created_at', 'updated_at', 'duration_minutes', 'attendance_count']
     date_hierarchy = 'date'
@@ -70,7 +70,7 @@ class LectureAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Lecture Information', {
-            'fields': ('trainer_course', 'lecture_number', 'date', 'start_time', 'end_time', 'is_completed')
+            'fields': ('trainer_course', 'lecture_number', 'date', 'start_time', 'end_time')
         }),
         ('Statistics', {
             'fields': ('duration_minutes', 'attendance_count'),
@@ -93,7 +93,7 @@ class AttendanceAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Attendance Information', {
-            'fields': ('lecture', 'student', 'status', 'remarks')
+            'fields': ('lecture', 'student', 'status')
         }),
         ('Record Information', {
             'fields': ('marked_by', 'marked_at'),

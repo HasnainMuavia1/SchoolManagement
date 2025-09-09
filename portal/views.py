@@ -1,4 +1,5 @@
 from django.shortcuts import render, redirect, get_object_or_404
+from django.urls import reverse
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
@@ -21,6 +22,22 @@ from .forms import (
     TrainerEditForm
 )
 from example.models import Course, Student, Batch
+def _renumber_lectures_for_assignment(trainer_course: TrainerCourse) -> None:
+    """Ensure lecture_number reflects chronological order for a given trainer_course.
+    Performs a two-phase renumber to avoid unique_together collisions.
+    """
+    # Phase 1: assign temporary numbers to avoid unique clashes
+    lectures = list(Lecture.objects.filter(trainer_course=trainer_course).order_by('date', 'start_time', 'id'))
+    # Temporary offset so we don't clash with existing 1..N
+    temp_offset = 1000
+    for idx, lec in enumerate(lectures, start=1):
+        temp_num = temp_offset + idx
+        if lec.lecture_number != temp_num:
+            Lecture.objects.filter(id=lec.id).update(lecture_number=temp_num)
+    # Phase 2: set final sequential numbers
+    for idx, lec in enumerate(lectures, start=1):
+        Lecture.objects.filter(id=lec.id).update(lecture_number=idx)
+
 
 
 def _students_for_assignment(course, batch, schedule):
@@ -102,39 +119,29 @@ def trainer_management(request):
     """Admin view for managing trainers"""
     trainers = Trainer.objects.select_related('user').all()
     
-    if request.method == 'POST':
-        form = TrainerCreationForm(request.POST)
-        is_ajax = request.headers.get('x-requested-with') == 'XMLHttpRequest'
-        if form.is_valid():
-            user = form.save()
-            trainer = getattr(user, 'trainer_profile', None)
-            if is_ajax:
-                return JsonResponse({
-                    'success': True,
-                    'trainer_id': trainer.id if trainer else None,
-                    'name': trainer.name if trainer else '',
-                    'username': user.username,
-                    'email': user.email,
-                })
-            messages.success(request, 'Trainer created successfully!')
-            return redirect('portal:trainer_management')
-        else:
-            if is_ajax:
-                # Extract first error message per field
-                errors = {field: errs[0] for field, errs in form.errors.items()}
-                return JsonResponse({
-                    'success': False,
-                    'message': 'Please correct the errors below.',
-                    'errors': errors,
-                }, status=400)
-    else:
-        form = TrainerCreationForm()
+    # Remove inline creation; use dedicated add page instead
+    form = TrainerCreationForm()
     
     context = {
         'trainers': trainers,
         'form': form,
     }
     return render(request, 'portal/admin/trainer_management.html', context)
+
+
+@login_required
+@user_passes_test(is_admin)
+def trainer_add(request):
+    """Dedicated page to add a new trainer (replaces modal)."""
+    if request.method == 'POST':
+        form = TrainerCreationForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            messages.success(request, 'Trainer created successfully!')
+            return redirect('portal:trainer_management')
+    else:
+        form = TrainerCreationForm()
+    return render(request, 'portal/admin/trainer_add.html', { 'form': form })
 
 
 @login_required
@@ -377,7 +384,7 @@ def trainer_dashboard(request):
         total_students += students_qs.count()
     # Today's completed lectures for this trainer
     today = timezone.now().date()
-    todays_lectures = Lecture.objects.filter(trainer_course__trainer=trainer, date=today, is_completed=True).count()
+    todays_lectures = Lecture.objects.filter(trainer_course__trainer=trainer, date=today, attendances__isnull=False).distinct().count()
     context = {
         'trainer': trainer,
         'assigned_courses': assigned_courses,
@@ -395,8 +402,8 @@ def trainer_course_detail(request, trainer_course_id):
     trainer = request.user.trainer_profile
     trainer_course = get_object_or_404(TrainerCourse, id=trainer_course_id, trainer=trainer)
     
-    # Show only completed lectures
-    lectures = Lecture.objects.filter(trainer_course=trainer_course, is_completed=True).order_by('lecture_number')
+    # Show only lectures with attendance, sorted by date then lecture number
+    lectures = Lecture.objects.filter(trainer_course=trainer_course, attendances__isnull=False).distinct().order_by('date', 'lecture_number')
     
     # Get students enrolled in this course (respect batch and schedule)
     schedule = getattr(trainer_course, 'schedule', None)
@@ -408,6 +415,57 @@ def trainer_course_detail(request, trainer_course_id):
         'students': students,
     }
     return render(request, 'portal/trainer/course_detail.html', context)
+
+
+@login_required
+@user_passes_test(is_trainer)
+def trainer_create_attendance_for_date(request, trainer_course_id):
+    """Create a lecture for a specific date and redirect to mark attendance."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'message': 'Invalid method'}, status=405)
+
+    trainer = request.user.trainer_profile
+    trainer_course = get_object_or_404(TrainerCourse, id=trainer_course_id, trainer=trainer)
+
+    try:
+        payload = json.loads(request.body or '{}')
+    except Exception:
+        payload = request.POST
+
+    date_str = payload.get('date')
+    if not date_str:
+        return JsonResponse({'success': False, 'message': 'Missing date'}, status=400)
+
+    try:
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({'success': False, 'message': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
+
+    # Determine next lecture number for that course regardless of date
+    last_lecture = Lecture.objects.filter(trainer_course=trainer_course).order_by('-lecture_number').first()
+    next_number = 1 if not last_lecture else last_lecture.lecture_number + 1
+
+    # Use Pakistan time for times
+    pk_tz = pytz.timezone('Asia/Karachi')
+    now_local = timezone.now().astimezone(pk_tz)
+    # Start at 10:00 AM local if creating for past date; otherwise now
+    default_start = now_local.replace(hour=10, minute=0, second=0, microsecond=0)
+    if target_date == now_local.date():
+        start_dt = now_local
+    else:
+        start_dt = pk_tz.localize(datetime.combine(target_date, default_start.timetz()))
+    duration_minutes = 60 if ('1_month' in (trainer_course.course.duration or '')) else 90
+    end_dt = start_dt + timedelta(minutes=duration_minutes)
+
+    lecture = Lecture.objects.create(
+        trainer_course=trainer_course,
+        lecture_number=next_number,
+        date=target_date,
+        start_time=start_dt.time().replace(second=0, microsecond=0),
+        end_time=end_dt.time().replace(second=0, microsecond=0),
+    )
+
+    return JsonResponse({'success': True, 'redirect': f"{request.build_absolute_uri('').rstrip('/')}{reverse('portal:mark_attendance', args=[lecture.id])}"})
 
 
 @login_required
@@ -426,25 +484,10 @@ def trainer_start_attendance(request, trainer_course_id):
     last_lecture = Lecture.objects.filter(trainer_course=trainer_course).order_by('-lecture_number').first()
     next_number = 1 if not last_lecture else last_lecture.lecture_number + 1
 
-    # If last lecture was completed, enforce slot cooldown until its end time
-    if last_lecture and last_lecture.is_completed:
-        # Build aware datetime for last lecture end in Pakistan time
-        pk_tz = pytz.timezone('Asia/Karachi')
-        last_end_naive = datetime.combine(last_lecture.date, last_lecture.end_time)
-        last_end = pk_tz.localize(last_end_naive)
-        now = timezone.now().astimezone(pk_tz)
-        if now < last_end:
-            remaining = last_end - now
-            # Round remaining minutes up
-            remaining_minutes = int((remaining.total_seconds() + 59) // 60)
-            messages.warning(
-                request,
-                f"You can't start the next lecture yet. Please wait ~{remaining_minutes} minutes until {last_end.strftime('%I:%M %p')}"
-            )
-            return redirect('portal:trainer_course_detail', trainer_course_id=trainer_course.id)
+    # Cooldown removed: allow opening mark page; time rules enforced on save
 
     # If the last lecture exists and is not completed, reuse it; otherwise create next
-    if last_lecture and not last_lecture.is_completed:
+    if last_lecture and not last_lecture.attendances.exists():
         lecture = last_lecture
     else:
         today = timezone.now().date()
@@ -458,9 +501,9 @@ def trainer_start_attendance(request, trainer_course_id):
             date=today,
             start_time=start_dt.time().replace(second=0, microsecond=0),
             end_time=end_dt.time().replace(second=0, microsecond=0),
-            is_completed=False
         )
-
+    # Ensure numbering is chronological after any creation
+    _renumber_lectures_for_assignment(trainer_course)
     return redirect('portal:mark_attendance', lecture_id=lecture.id)
 
 
@@ -472,25 +515,87 @@ def mark_attendance(request, lecture_id):
     lecture = get_object_or_404(Lecture, id=lecture_id, trainer_course__trainer=trainer)
     
     if request.method == 'POST':
-        # If this is the first time marking for this lecture, reset slot to start now
+        # Handle bulk attendance submission
+        data = json.loads(request.body)
+        # If a specific date is provided, set the lecture's date accordingly
+        selected_date_str = data.get('date')
+        selected_date = None
+        if selected_date_str:
+            try:
+                selected_date = datetime.strptime(selected_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                selected_date = None
+
+        # Enforce slot rule: if marking for today and current time is before slot end, block save
+        pk_tz = pytz.timezone('Asia/Karachi')
+        now_local = timezone.now().astimezone(pk_tz)
+        target_date = selected_date or lecture.date
+        if target_date == now_local.date():
+            # Determine slot end
+            duration_minutes = 60 if ('1_month' in (lecture.trainer_course.course.duration or '')) else 90
+            if lecture.end_time:
+                end_dt = pk_tz.localize(datetime.combine(target_date, lecture.end_time))
+            else:
+                # Fallback: compute from start_time or assume now + duration
+                base_start = lecture.start_time if lecture.start_time else now_local.time()
+                base_start_dt = pk_tz.localize(datetime.combine(target_date, base_start))
+                end_dt = base_start_dt + timedelta(minutes=duration_minutes)
+            # Also block if any other ongoing lecture (including this one) hasn't ended yet today
+            ongoing_block = False
+            candidate_lectures = Lecture.objects.filter(
+                trainer_course=lecture.trainer_course,
+                date=target_date,
+            )
+            for lec in candidate_lectures:
+                if lec.end_time:
+                    lec_end = pk_tz.localize(datetime.combine(target_date, lec.end_time))
+                else:
+                    lec_start_time = lec.start_time if lec.start_time else now_local.time()
+                    lec_start = pk_tz.localize(datetime.combine(target_date, lec_start_time))
+                    lec_end = lec_start + timedelta(minutes=duration_minutes)
+                # Consider it ongoing if start <= now < end
+                lec_start_cmp = lec.start_time or base_start
+                lec_start_dt_cmp = pk_tz.localize(datetime.combine(target_date, lec_start_cmp))
+                if (now_local >= lec_start_dt_cmp) and (now_local < lec_end):
+                    ongoing_block = True
+                    end_dt = max(end_dt, lec_end)
+                    break
+
+            if now_local < end_dt or ongoing_block:
+                # Cleanup: avoid leaving behind empty lectures started in this slot
+                if Attendance.objects.filter(lecture=lecture).count() == 0:
+                    try:
+                        # Only delete if no attendance saved yet
+                        lecture.delete()
+                        # Note: caller page may hold a stale lecture_id; front-end stays put and shows error toast
+                    except Exception:
+                        pass
+                return JsonResponse({
+                    'success': False,
+                    'message': f"You can submit attendance after {end_dt.strftime('%I:%M %p')}"
+                }, status=400)
+
+        # If this is the first time marking for this lecture, set start/end based on now but anchor date to selected (if any)
         if not Attendance.objects.filter(lecture=lecture).exists():
             pk_tz = pytz.timezone('Asia/Karachi')
             now = timezone.now().astimezone(pk_tz)
             duration_minutes = 60 if ('1_month' in (lecture.trainer_course.course.duration or '')) else 90
             new_end = now + timedelta(minutes=duration_minutes)
-            lecture.date = now.date()
+            lecture.date = selected_date or now.date()
             lecture.start_time = now.time().replace(second=0, microsecond=0)
             lecture.end_time = new_end.time().replace(second=0, microsecond=0)
             lecture.save(update_fields=['date', 'start_time', 'end_time'])
-
-        # Handle bulk attendance submission
-        data = json.loads(request.body)
+            _renumber_lectures_for_assignment(lecture.trainer_course)
+        elif selected_date:
+            # If attendance exists but user changed date, update date only
+            lecture.date = selected_date
+            lecture.save(update_fields=['date'])
+            _renumber_lectures_for_assignment(lecture.trainer_course)
         success_count = 0
         
         for student_data in data.get('attendances', []):
             student_id = student_data.get('student_id')
             status = student_data.get('status')
-            remarks = student_data.get('remarks', '')
             
             if student_id and status:
                 student = get_object_or_404(Student, id=student_id)
@@ -499,22 +604,18 @@ def mark_attendance(request, lecture_id):
                     student=student,
                     defaults={
                         'status': status,
-                        'remarks': remarks,
                         'marked_by': trainer
                     }
                 )
                 
                 if not created:
                     attendance.status = status
-                    attendance.remarks = remarks
                     attendance.marked_by = trainer
                     attendance.save()
                 
                 success_count += 1
         
-        # Mark lecture completed when attendance is saved
-        lecture.is_completed = True
-        lecture.save(update_fields=['is_completed'])
+        # No is_completed flag anymore
         
         return JsonResponse({
             'success': True,
@@ -528,11 +629,10 @@ def mark_attendance(request, lecture_id):
     
     # Get existing attendance records
     existing_attendance = {}
-    attendance_counts = {"present": 0, "absent": 0, "late": 0, "excused": 0}
+    attendance_counts = {"present": 0, "absent": 0}
     for attendance in Attendance.objects.filter(lecture=lecture):
         existing_attendance[attendance.student.id] = {
-            'status': attendance.status,
-            'remarks': attendance.remarks
+            'status': attendance.status
         }
         if attendance.status in attendance_counts:
             attendance_counts[attendance.status] += 1
@@ -550,7 +650,7 @@ def mark_attendance(request, lecture_id):
     # Only get lectures from the same trainer course assignment (same batch and schedule)
     prev_lectures = Lecture.objects.filter(
         trainer_course=lecture.trainer_course
-    ).exclude(id=lecture.id).order_by('-date')[:7]
+    ).exclude(id=lecture.id).order_by('date', 'lecture_number')
     prev_dates = [lec.date for lec in prev_lectures]
     
     # Additional safety check: ensure all previous lectures are from the same assignment
@@ -571,9 +671,7 @@ def mark_attendance(request, lecture_id):
         ).select_related('lecture', 'student')
         
         # Debug: Log what we found
-        print(f"Found {prev_atts.count()} previous attendance records")
-        print(f"Students in current assignment: {[s.name for s in students]}")
-        print(f"Previous lectures dates: {[lec.date for lec in prev_lectures]}")
+        # Debug logs retained intentionally for troubleshooting
         
         for att in prev_atts:
             if att.student_id in prev_status_by_student:  # Double-check student is in current assignment
@@ -719,10 +817,8 @@ def download_attendance_report(request, report_type, object_id=None):
         header_row2 = ['', '']
         for idx, lec in enumerate(lectures, start=1):
             header_row1.extend([f"Lecture # {idx}", ''])
-            start_str = lec.start_time.strftime('%I:%M %p') if lec.start_time else ''
-            end_str = lec.end_time.strftime('%I:%M %p') if lec.end_time else ''
-            date_time_str = f"{lec.date.strftime('%d/%m/%Y')} {start_str}\u2013{end_str}" if lec.date else f"{start_str}\u2013{end_str}"
-            header_row2.extend([lec.date.strftime('%a').upper() if lec.date else '', date_time_str])
+            date_str = lec.date.strftime('%d/%m/%Y') if lec.date else ''
+            header_row2.extend([lec.date.strftime('%a').upper() if lec.date else '', date_str])
         header_row1.append('Marked By')
         header_row2.append('')
         ws.append(header_row1)
@@ -744,7 +840,7 @@ def download_attendance_report(request, report_type, object_id=None):
         attendances = Attendance.objects.filter(lecture__in=lectures, student__in=students_qs).select_related('lecture', 'student')
         att_map = {}
         for a in attendances:
-            symbol = 'present' if a.status in ['present', 'late'] else ('absent' if a.status == 'absent' else '-')
+            symbol = 'present' if a.status == 'present' else ('absent' if a.status == 'absent' else '-')
             att_map[(a.student_id, a.lecture_id)] = symbol
         # Marked By (trainer) resolution
         trainer_names = set()
@@ -903,16 +999,31 @@ def download_attendance_report(request, report_type, object_id=None):
         batch = get_object_or_404(Batch, id=object_id)
         courses = Course.objects.filter(students__batch=batch).distinct()
         for c in courses:
-            tc = TrainerCourse.objects.filter(course=c, batch=batch).select_related('trainer').first()
-            lectures = Lecture.objects.filter(trainer_course__course=c, trainer_course__batch=batch)
-            if not Attendance.objects.filter(lecture__in=lectures).exists():
+            # Handle multiple assignments/slots (e.g., weekdays/weekend) for the same course within the batch
+            tcs = list(TrainerCourse.objects.filter(course=c, batch=batch).select_related('trainer'))
+            if not tcs:
+                # Fallback: aggregate by course if no explicit assignment found
+                lectures = Lecture.objects.filter(trainer_course__course=c, trainer_course__batch=batch)
+                if not Attendance.objects.filter(lecture__in=lectures).exists():
+                    continue
+                students = _students_for_assignment(c, batch, None)
+                title = f"{c.name}"
+                if build_sheet_for_course(wb, c, lectures, students, title):
+                    sheets_created += 1
                 continue
-            schedule = getattr(tc, 'schedule', None) if tc else None
-            students = _students_for_assignment(c, batch, schedule)
-            trainer_name = tc.trainer.name if tc and tc.trainer else 'Trainer'
-            title = f"{c.name} - {trainer_name}"
-            if build_sheet_for_course(wb, c, lectures, students, title):
-                sheets_created += 1
+
+            for tc in tcs:
+                schedule = getattr(tc, 'schedule', None)
+                # Only include lectures for this specific trainer assignment/slot
+                lectures = Lecture.objects.filter(trainer_course=tc)
+                if not Attendance.objects.filter(lecture__in=lectures).exists():
+                    continue
+                students = _students_for_assignment(c, batch, schedule)
+                schedule_label = f" - {schedule.capitalize()}" if schedule else ""
+                trainer_label = f" - {tc.trainer.name}" if getattr(tc, 'trainer', None) else ""
+                title = f"{c.name}{schedule_label}{trainer_label}"
+                if build_sheet_for_course(wb, c, lectures, students, title):
+                    sheets_created += 1
         filename = f"Batch {sanitize_title(batch.batch_number)}.xlsx"
 
     elif is_admin(request.user):
@@ -960,7 +1071,7 @@ def student_details(request, student_id):
             lectures_qs = lectures_qs.filter(models.Q(trainer_course__batch__isnull=True) | models.Q(trainer_course__batch=student.batch))
         attendances = Attendance.objects.filter(student=student, lecture__in=lectures_qs).select_related('lecture').order_by('lecture__date')
         total = attendances.count()
-        present = attendances.filter(status__in=['present', 'late']).count()
+        present = attendances.filter(status='present').count()
         absent = attendances.filter(status='absent').count()
         # Build compact history list for template rendering (with 12-hour time)
         history = []

@@ -105,7 +105,7 @@ class LectureForm(forms.ModelForm):
     """Form for creating/editing lectures"""
     class Meta:
         model = Lecture
-        fields = ['lecture_number', 'date', 'start_time', 'end_time', 'is_completed']
+        fields = ['lecture_number', 'date', 'start_time', 'end_time']
         widgets = {
             'lecture_number': forms.NumberInput(attrs={
                 'class': 'w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent'
@@ -121,9 +121,6 @@ class LectureForm(forms.ModelForm):
             'end_time': forms.TimeInput(attrs={
                 'class': 'w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent',
                 'type': 'time'
-            }),
-            'is_completed': forms.CheckboxInput(attrs={
-                'class': 'w-4 h-4 text-ring bg-input border-border rounded focus:ring-ring focus:ring-2'
             })
         }
     
@@ -142,15 +139,10 @@ class AttendanceForm(forms.ModelForm):
     """Form for marking attendance"""
     class Meta:
         model = Attendance
-        fields = ['status', 'remarks']
+        fields = ['status']
         widgets = {
             'status': forms.Select(attrs={
                 'class': 'w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent'
-            }),
-            'remarks': forms.Textarea(attrs={
-                'class': 'w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent',
-                'rows': 3,
-                'placeholder': 'Add any remarks about attendance...'
             })
         }
 

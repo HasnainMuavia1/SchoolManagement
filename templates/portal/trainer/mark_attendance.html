@@ -20,6 +20,12 @@
 <div class="space-y-6">
     <!-- Attendance Form -->
     <div class="bg-card border border-border rounded-lg p-6 shadow-sm">
+        <!-- Notification container -->
+        <div id="notify" class="fixed top-4 right-4 space-y-2 z-50"></div>
+        <div class="mb-6">
+            <label class="block text-sm font-medium text-foreground mb-2">Attendance Date</label>
+            <input type="date" id="attendanceDate" class="px-3 py-2 border border-border rounded-md bg-input text-foreground" value="{{ lecture.date|date:'Y-m-d' }}" />
+        </div>
         <form id="attendanceForm" class="space-y-6">
             {% csrf_token %}
 
@@ -88,14 +94,25 @@
 </div>
 
 <script>
+function showToast(message, type = 'info') {
+    const container = document.getElementById('notify');
+    if (!container) return;
+    const bg = type === 'error' ? 'bg-red-600' : (type === 'success' ? 'bg-green-600' : 'bg-gray-800');
+    const el = document.createElement('div');
+    el.className = `${bg} text-white px-4 py-3 rounded shadow-lg flex items-center space-x-3 animate-fade-in`;
+    el.innerHTML = `<span>${message}</span>`;
+    container.appendChild(el);
+    setTimeout(() => { el.classList.add('opacity-0'); setTimeout(() => el.remove(), 300); }, 3500);
+}
+
 document.getElementById('attendanceForm').addEventListener('submit', function(e) {
     e.preventDefault();
 
-    const attendanceData = { lecture_id: {{ lecture.id }}, attendances: [] };
+    const attendanceData = { lecture_id: {{ lecture.id }}, attendances: [], date: document.getElementById('attendanceDate').value };
 
     {% for student in students %}
     const present_{{ student.id }} = document.querySelector('input[name="present_{{ student.id }}"]').checked;
-    attendanceData.attendances.push({ student_id: {{ student.id }}, status: present_{{ student.id }} ? 'present' : 'absent', remarks: '' });
+    attendanceData.attendances.push({ student_id: {{ student.id }}, status: present_{{ student.id }} ? 'present' : 'absent' });
     {% endfor %}
 
     fetch('{% url "portal:mark_attendance" lecture_id=lecture.id %}', {
@@ -103,14 +120,16 @@ document.getElementById('attendanceForm').addEventListener('submit', function(e)
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value },
         body: JSON.stringify(attendanceData)
     })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            alert('Attendance saved successfully!');
-            window.location.href = '{% url "portal:trainer_course_detail" trainer_course_id=lecture.trainer_course.id %}';
-        } else { alert('Error: ' + data.message); }
+    .then(async r => ({ ok: r.ok, json: await r.json().catch(() => ({})) }))
+    .then(({ ok, json }) => {
+        if (ok && json.success) {
+            showToast('Attendance saved successfully!', 'success');
+            setTimeout(() => { window.location.href = '{% url "portal:trainer_course_detail" trainer_course_id=lecture.trainer_course.id %}'; }, 800);
+        } else {
+            showToast(json.message || 'Failed to save attendance.', 'error');
+        }
     })
-    .catch(err => { console.error('Error:', err); alert('An error occurred while saving attendance.'); });
+    .catch(err => { console.error('Error:', err); showToast('An error occurred while saving attendance.', 'error'); });
 });
 </script>
 {% endblock %}

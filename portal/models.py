@@ -59,8 +59,8 @@ class TrainerCourse(models.Model):
     
     @property
     def completed_lectures(self):
-        """Get count of completed lectures"""
-        return self.lectures.filter(is_completed=True).count()
+        """Get count of lectures that have any attendance recorded"""
+        return self.lectures.filter(attendances__isnull=False).distinct().count()
     
     @property
     def progress_percentage(self):
@@ -77,7 +77,6 @@ class Lecture(models.Model):
     date = models.DateField()
     start_time = models.TimeField()
     end_time = models.TimeField()
-    is_completed = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -110,14 +109,11 @@ class Attendance(models.Model):
     ATTENDANCE_STATUS_CHOICES = [
         ('present', 'Present'),
         ('absent', 'Absent'),
-        ('late', 'Late'),
-        ('excused', 'Excused'),
     ]
     
     lecture = models.ForeignKey(Lecture, on_delete=models.CASCADE, related_name='attendances')
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='attendances')
     status = models.CharField(max_length=10, choices=ATTENDANCE_STATUS_CHOICES, default='present')
-    remarks = models.TextField(blank=True, help_text="Additional notes about attendance")
     marked_by = models.ForeignKey(Trainer, on_delete=models.CASCADE, related_name='marked_attendances')
     marked_at = models.DateTimeField(default=timezone.now)
     
@@ -131,8 +127,8 @@ class Attendance(models.Model):
     
     @property
     def is_present(self):
-        """Check if student was present (including late)"""
-        return self.status in ['present', 'late']
+        """Check if student was present."""
+        return self.status == 'present'
 
 
 class AttendanceReport(models.Model):

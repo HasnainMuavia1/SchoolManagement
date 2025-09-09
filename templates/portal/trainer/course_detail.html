@@ -109,13 +109,9 @@
                     <tr class="border-b border-border hover:bg-muted">
                         <td class="py-3 px-4 font-medium">{{ lecture.lecture_number }}</td>
                         <td class="py-3 px-4">{{ lecture.date|date:"M d, Y" }}</td>
-                        <td class="py-3 px-4">{{ lecture.start_time|time:"H:i" }} - {{ lecture.end_time|time:"H:i" }}</td>
+                        <td class="py-3 px-4">{{ lecture.start_time|time:"h:i A" }} - {{ lecture.end_time|time:"h:i A" }}</td>
                         <td class="py-3 px-4">
-                            {% if lecture.is_completed %}
                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Completed</span>
-                            {% else %}
-                            <span class="text-sm text-muted-foreground">Not marked</span>
-                            {% endif %}
                         </td>
                         <td class="py-3 px-4">
                             <a href="{% url 'portal:mark_attendance' lecture_id=lecture.id %}"
@@ -164,4 +160,5 @@
         {% endif %}
     </div>
 </div>
+<!-- No date creation here per requirement; handled on mark page via date field -->
 {% endblock %}
