@@ -1,4 +1,3 @@
-
 {
   "version": 2,
   "builds": [
@@ -20,8 +19,6 @@
       "src": "/static/(.*)",
       "dest": "/static/$1"
     },
-    { "src": "/", "has": [{ "type": "host", "value": "aktiportal.vercel.app" }], "status": 308, "headers": { "Location": "/management/" } },
-    { "src": "/management/?", "has": [{ "type": "host", "value": "aktipos.vercel.app" }], "status": 308, "headers": { "Location": "/" } },
     {
       "src": "/(.*)",
       "dest": "api/wsgi.py"
